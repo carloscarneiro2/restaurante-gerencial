@@ -25,7 +25,7 @@
     }
     button.secondary{background:#334155}
     button:disabled{opacity:.6;cursor:not-allowed}
-    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
     .kpis{display:flex;gap:10px;flex-wrap:wrap}
     .kpi{background:#0b1220;border:1px solid #334155;border-radius:12px;padding:10px 12px;min-width:180px}
     .kpi b{display:block;margin-bottom:6px}
@@ -44,8 +44,7 @@
     <div class="card">
       <h2>Painel Gerencial</h2>
       <p class="muted">
-        Este painel é separado do site dos clientes e usa a API do Google Apps Script.
-        Sem a senha, não lista pedidos nem atualiza o cardápio.
+        Painel separado do site dos clientes. Use a senha para atualizar cardápio, listar pedidos e ver dashboard.
       </p>
 
       <label>Senha do painel</label>
@@ -59,21 +58,37 @@
 
     <div class="card">
       <h3>Cardápio (atualizar)</h3>
-      <div class="row">
-        <div>
-          <label>URL da imagem do cardápio</label>
-          <input id="cardapioImg" placeholder="Ex.: https://.../cardapio.jpg" />
-          <p class="muted">Use uma URL pública (GitHub raw, Drive público, Imgur, etc.).</p>
-        </div>
+
+      <label>URL da imagem do cardápio (opcional)</label>
+      <input id="cardapioImg" placeholder="Ex.: https://.../cardapio.jpg" />
+      <p class="muted">Você pode colar uma URL pública OU enviar a imagem do PC abaixo.</p>
+
+      <label>Enviar imagem do PC</label>
+      <input id="cardapioFile" type="file" accept="image/*" />
+      <p class="muted">Ao enviar, a imagem vai para o Google Drive e a URL é atualizada automaticamente.</p>
+
+      <div class="actions">
+        <button class="secondary" id="btnEnviarImagem">Enviar imagem</button>
+        <span id="statusUpload" class="muted"></span>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
         <div>
           <label>Texto do cardápio (opcional)</label>
           <textarea id="cardapioTexto" placeholder="Ex.: Segunda: Feijoada..."></textarea>
+        </div>
+        <div>
+          <label>Prévia</label>
+          <div class="card" style="margin:0;padding:10px;background:#0b1220;border-color:#334155;">
+            <img id="previewImg" src="" alt="Prévia do cardápio" style="width:100%;border-radius:12px;display:none;border:1px solid #334155;">
+            <p id="previewHint" class="muted" style="margin:0;">Sem prévia ainda.</p>
+          </div>
         </div>
       </div>
 
       <div class="actions">
         <button id="btnCarregarCardapio" class="secondary">Carregar atual</button>
-        <button id="btnSalvarCardapio">Salvar cardápio</button>
+        <button id="btnSalvarCardapio">Salvar (usar URL)</button>
         <span id="statusCardapio" class="muted"></span>
       </div>
     </div>
@@ -92,7 +107,7 @@
 
     <div class="card">
       <h3>Pedidos</h3>
-      <p class="muted">Lista os últimos 500 pedidos. Você pode exportar CSV (abre no Excel).</p>
+      <p class="muted">Lista os últimos 500 pedidos. Exporta CSV (Excel).</p>
 
       <div class="actions">
         <button class="secondary" id="btnPedidos">Carregar pedidos</button>
@@ -111,7 +126,7 @@
   </div>
 
 <script>
-  // ✅ API do Google Apps Script (a mesma usada no site do cliente)
+  // ✅ API do Google Apps Script
   const API_URL = "https://script.google.com/macros/s/AKfycbzx3CT2Ow75Zb5JSQ8cy1toem9nFgHqxXHOK_6CbUuioZ5ar6zT1zzzyup_c02-uHs2/exec";
 
   const $ = (id) => document.getElementById(id);
@@ -123,9 +138,7 @@
     else el.className = "muted";
   }
 
-  function password(){
-    return $("password").value || "";
-  }
+  function password(){ return $("password").value || ""; }
 
   async function getPublic(){
     const r = await fetch(API_URL, { cache: "no-store" });
@@ -141,32 +154,47 @@
     return r.json();
   }
 
-  // Testar conexão (GET público)
+  function setPreview(url){
+    const img = $("previewImg");
+    const hint = $("previewHint");
+    if (url && url.trim()) {
+      img.src = url.trim();
+      img.style.display = "block";
+      hint.style.display = "none";
+    } else {
+      img.src = "";
+      img.style.display = "none";
+      hint.style.display = "block";
+    }
+  }
+
+  // Testar conexão
   $("btnTestar").onclick = async () => {
     try{
       setStatus($("statusTopo"), "Testando conexão...", null);
       const pub = await getPublic();
-      if (!pub || !pub.ok) throw new Error("Resposta inválida");
-      setStatus($("statusTopo"), "✅ Conexão OK (cardápio público acessível).", true);
+      if (!pub?.ok) throw new Error("Resposta inválida");
+      setStatus($("statusTopo"), "✅ Conexão OK.", true);
     }catch(e){
-      setStatus($("statusTopo"), "❌ Falha ao testar. Verifique a API/implantação.", false);
+      setStatus($("statusTopo"), "❌ Falha ao testar. Reimplante o Web App se necessário.", false);
     }
   };
 
-  // Cardápio: carregar
+  // Carregar cardápio atual
   $("btnCarregarCardapio").onclick = async () => {
     try{
       setStatus($("statusCardapio"), "Carregando...", null);
       const pub = await getPublic();
       $("cardapioImg").value = (pub.cardapio?.img || "");
       $("cardapioTexto").value = (pub.cardapio?.texto || "");
+      setPreview(pub.cardapio?.img || "");
       setStatus($("statusCardapio"), "✅ Cardápio carregado.", true);
     }catch(e){
-      setStatus($("statusCardapio"), "❌ Não foi possível carregar o cardápio.", false);
+      setStatus($("statusCardapio"), "❌ Não foi possível carregar.", false);
     }
   };
 
-  // Cardápio: salvar
+  // Salvar usando URL manual
   $("btnSalvarCardapio").onclick = async () => {
     try{
       setStatus($("statusCardapio"), "Salvando...", null);
@@ -175,10 +203,60 @@
         cardapio_img: $("cardapioImg").value.trim(),
         cardapio_texto: $("cardapioTexto").value.trim()
       });
-      if (!res || !res.ok) throw new Error(res?.error || "Erro ao salvar");
+      if (!res?.ok) throw new Error(res?.error || "Erro ao salvar");
+      setPreview($("cardapioImg").value);
       setStatus($("statusCardapio"), "✅ Cardápio atualizado!", true);
     }catch(e){
       setStatus($("statusCardapio"), "❌ " + (e.message || "Erro"), false);
+    }
+  };
+
+  // ✅ Upload imagem do PC -> Drive -> salva URL no Config
+  $("btnEnviarImagem").onclick = async () => {
+    const f = $("cardapioFile").files[0];
+    if (!f) return alert("Selecione uma imagem primeiro.");
+
+    const MAX_MB = 5;
+    if (f.size > MAX_MB * 1024 * 1024) {
+      return alert(`Arquivo muito grande. Máximo: ${MAX_MB}MB`);
+    }
+
+    try{
+      setStatus($("statusUpload"), "Enviando imagem...", null);
+
+      // lê como base64
+      const base64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = reject;
+        r.readAsDataURL(f);
+      });
+
+      // 1) upload no Drive via API
+      const up = await postAdmin({
+        action: "upload_menu_image",
+        base64,
+        mime: f.type || "image/jpeg",
+        filename: f.name || "cardapio.jpg"
+      });
+      if (!up?.ok) throw new Error(up?.error || "Falha no upload");
+
+      // 2) preenche URL
+      $("cardapioImg").value = up.image_url;
+      setPreview(up.image_url);
+
+      // 3) salva no Config
+      const res = await postAdmin({
+        action: "update_menu",
+        cardapio_img: up.image_url,
+        cardapio_texto: $("cardapioTexto").value.trim()
+      });
+      if (!res?.ok) throw new Error(res?.error || "Falha ao salvar no Config");
+
+      setStatus($("statusUpload"), "✅ Imagem enviada e cardápio atualizado!", true);
+      setStatus($("statusCardapio"), "✅ Cardápio atualizado!", true);
+    }catch(e){
+      setStatus($("statusUpload"), "❌ " + (e.message || "Erro"), false);
     }
   };
 
@@ -188,10 +266,9 @@
     const keys = Object.keys(obj || {});
     if (!keys.length) return;
     keys.forEach(k => {
-      const v = obj[k];
       const chip = document.createElement("div");
       chip.className = "chip";
-      chip.textContent = `${k}: ${v}`;
+      chip.textContent = `${k}: ${obj[k]}`;
       container.appendChild(chip);
     });
   }
@@ -200,14 +277,13 @@
     try{
       setStatus($("statusDash"), "Atualizando dashboard...", null);
       const res = await postAdmin({ action: "dashboard" });
-      if (!res || !res.ok) throw new Error(res?.error || "Erro");
+      if (!res?.ok) throw new Error(res?.error || "Erro");
 
       const d = res.dashboard || {};
       $("kpis").innerHTML = `
         <div class="kpi"><b>Total de pedidos</b>${d.totalPedidos ?? 0}</div>
         <div class="kpi"><b>Pedidos hoje</b>${d.pedidosHoje ?? 0}</div>
       `;
-
       renderChips($("chipsPg"), d.porPagamento);
       renderChips($("chipsOrigem"), d.porOrigem);
 
@@ -229,28 +305,20 @@
 
   function renderTable(data){
     const headers = ["DataHora","Nome","Telefone","Endereco","Pedido","Pagamento","Troco","Obs","Origem"];
-
     $("tbl").querySelector("thead").innerHTML =
       "<tr>" + headers.map(h => `<th>${h}</th>`).join("") + "</tr>";
-
     $("tbl").querySelector("tbody").innerHTML =
-      data.map(o => `
-        <tr>
-          ${headers.map(h => `<td>${escapeHtml(o[h])}</td>`).join("")}
-        </tr>
-      `).join("");
+      data.map(o => `<tr>${headers.map(h => `<td>${escapeHtml(o[h])}</td>`).join("")}</tr>`).join("");
   }
 
   $("btnPedidos").onclick = async () => {
     try{
       setStatus($("statusPedidos"), "Carregando pedidos...", null);
       const res = await postAdmin({ action: "list_orders" });
-      if (!res || !res.ok) throw new Error(res?.error || "Erro");
-
+      if (!res?.ok) throw new Error(res?.error || "Erro");
       lastOrders = res.data || [];
       renderTable(lastOrders);
       $("btnExportar").disabled = !lastOrders.length;
-
       setStatus($("statusPedidos"), `✅ ${lastOrders.length} pedidos carregados.`, true);
     }catch(e){
       setStatus($("statusPedidos"), "❌ " + (e.message || "Erro"), false);
@@ -258,10 +326,8 @@
     }
   };
 
-  // Exportar CSV (abre no Excel)
   $("btnExportar").onclick = () => {
     if (!lastOrders.length) return;
-
     const headers = ["DataHora","Nome","Telefone","Endereco","Pedido","Pagamento","Troco","Obs","Origem"];
     const csv = [
       headers.join(";"),
@@ -277,14 +343,14 @@
     URL.revokeObjectURL(url);
   };
 
-  // Carrega automaticamente o cardápio atual ao abrir (opcional)
-  // Você pode comentar se não quiser.
+  // Carrega o cardápio atual ao abrir
   (async () => {
     try {
       const pub = await getPublic();
       if (pub?.ok) {
         $("cardapioImg").value = pub.cardapio?.img || "";
         $("cardapioTexto").value = pub.cardapio?.texto || "";
+        setPreview(pub.cardapio?.img || "");
       }
     } catch(e) {}
   })();
