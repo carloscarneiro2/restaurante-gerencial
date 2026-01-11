@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Painel Gerencial - Restaurante</title>
+  <style>
+    *{box-sizing:border-box;font-family:Arial,sans-serif}
+    body{margin:0;padding:18px;background:#0f172a;color:#e5e7eb}
+    .wrap{max-width:1100px;margin:0 auto}
+    .card{background:#111827;border:1px solid #334155;border-radius:14px;padding:16px;margin-bottom:14px}
+    h2,h3{margin:0 0 10px 0}
+    .muted{color:#94a3b8;font-size:12px;line-height:1.35}
+    label{display:block;margin-top:10px;font-weight:bold;font-size:13px}
+    input,textarea{
+      width:100%;padding:10px;border-radius:10px;border:1px solid #475569;
+      background:#0b1220;color:#e5e7eb;margin-top:6px
+    }
+    textarea{min-height:90px;resize:vertical}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    @media(max-width:900px){.row{grid-template-columns:1fr}}
+    button{
+      background:#b91c1c;border:none;color:#fff;padding:10px 14px;border-radius:10px;
+      font-weight:bold;cursor:pointer
+    }
+    button.secondary{background:#334155}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+    .kpis{display:flex;gap:10px;flex-wrap:wrap}
+    .kpi{background:#0b1220;border:1px solid #334155;border-radius:12px;padding:10px 12px;min-width:180px}
+    .kpi b{display:block;margin-bottom:6px}
+    .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+    .chip{background:#0b1220;border:1px solid #334155;border-radius:999px;padding:6px 10px;font-size:12px}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #334155;padding:8px;text-align:left;font-size:13px;vertical-align:top}
+    th{color:#cbd5e1}
+    .ok{color:#86efac}
+    .err{color:#fca5a5}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="card">
+      <h2>Painel Gerencial</h2>
+      <p class="muted">
+        Este painel é separado do site dos clientes e usa a API do Google Apps Script.
+        Sem a senha, não lista pedidos nem atualiza o cardápio.
+      </p>
+
+      <label>Senha do painel</label>
+      <input id="password" type="password" placeholder="Digite a senha do estabelecimento" />
+
+      <div class="actions">
+        <button class="secondary" id="btnTestar">Testar conexão</button>
+        <span id="statusTopo" class="muted"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Cardápio (atualizar)</h3>
+      <div class="row">
+        <div>
+          <label>URL da imagem do cardápio</label>
+          <input id="cardapioImg" placeholder="Ex.: https://.../cardapio.jpg" />
+          <p class="muted">Use uma URL pública (GitHub raw, Drive público, Imgur, etc.).</p>
+        </div>
+        <div>
+          <label>Texto do cardápio (opcional)</label>
+          <textarea id="cardapioTexto" placeholder="Ex.: Segunda: Feijoada..."></textarea>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="btnCarregarCardapio" class="secondary">Carregar atual</button>
+        <button id="btnSalvarCardapio">Salvar cardápio</button>
+        <span id="statusCardapio" class="muted"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Dashboard</h3>
+      <div class="kpis" id="kpis"></div>
+      <div class="chips" id="chipsPg"></div>
+      <div class="chips" id="chipsOrigem"></div>
+
+      <div class="actions">
+        <button class="secondary" id="btnDash">Atualizar dashboard</button>
+        <span id="statusDash" class="muted"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Pedidos</h3>
+      <p class="muted">Lista os últimos 500 pedidos. Você pode exportar CSV (abre no Excel).</p>
+
+      <div class="actions">
+        <button class="secondary" id="btnPedidos">Carregar pedidos</button>
+        <button class="secondary" id="btnExportar" disabled>Exportar CSV</button>
+        <span id="statusPedidos" class="muted"></span>
+      </div>
+
+      <div style="overflow:auto;margin-top:12px;">
+        <table id="tbl">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+  // ✅ API do Google Apps Script (a mesma usada no site do cliente)
+  const API_URL = "https://script.google.com/macros/s/AKfycbzx3CT2Ow75Zb5JSQ8cy1toem9nFgHqxXHOK_6CbUuioZ5ar6zT1zzzyup_c02-uHs2/exec";
+
+  const $ = (id) => document.getElementById(id);
+
+  function setStatus(el, msg, ok=null){
+    el.textContent = msg ? msg : "";
+    if (ok === true) el.className = "muted ok";
+    else if (ok === false) el.className = "muted err";
+    else el.className = "muted";
+  }
+
+  function password(){
+    return $("password").value || "";
+  }
+
+  async function getPublic(){
+    const r = await fetch(API_URL, { cache: "no-store" });
+    return r.json();
+  }
+
+  async function postAdmin(payload){
+    const r = await fetch(API_URL, {
+      method: "POST",
+      body: JSON.stringify({ ...payload, password: password() }),
+      headers: { "Content-Type": "text/plain;charset=utf-8" }
+    });
+    return r.json();
+  }
+
+  // Testar conexão (GET público)
+  $("btnTestar").onclick = async () => {
+    try{
+      setStatus($("statusTopo"), "Testando conexão...", null);
+      const pub = await getPublic();
+      if (!pub || !pub.ok) throw new Error("Resposta inválida");
+      setStatus($("statusTopo"), "✅ Conexão OK (cardápio público acessível).", true);
+    }catch(e){
+      setStatus($("statusTopo"), "❌ Falha ao testar. Verifique a API/implantação.", false);
+    }
+  };
+
+  // Cardápio: carregar
+  $("btnCarregarCardapio").onclick = async () => {
+    try{
+      setStatus($("statusCardapio"), "Carregando...", null);
+      const pub = await getPublic();
+      $("cardapioImg").value = (pub.cardapio?.img || "");
+      $("cardapioTexto").value = (pub.cardapio?.texto || "");
+      setStatus($("statusCardapio"), "✅ Cardápio carregado.", true);
+    }catch(e){
+      setStatus($("statusCardapio"), "❌ Não foi possível carregar o cardápio.", false);
+    }
+  };
+
+  // Cardápio: salvar
+  $("btnSalvarCardapio").onclick = async () => {
+    try{
+      setStatus($("statusCardapio"), "Salvando...", null);
+      const res = await postAdmin({
+        action: "update_menu",
+        cardapio_img: $("cardapioImg").value.trim(),
+        cardapio_texto: $("cardapioTexto").value.trim()
+      });
+      if (!res || !res.ok) throw new Error(res?.error || "Erro ao salvar");
+      setStatus($("statusCardapio"), "✅ Cardápio atualizado!", true);
+    }catch(e){
+      setStatus($("statusCardapio"), "❌ " + (e.message || "Erro"), false);
+    }
+  };
+
+  // Dashboard
+  function renderChips(container, obj){
+    container.innerHTML = "";
+    const keys = Object.keys(obj || {});
+    if (!keys.length) return;
+    keys.forEach(k => {
+      const v = obj[k];
+      const chip = document.createElement("div");
+      chip.className = "chip";
+      chip.textContent = `${k}: ${v}`;
+      container.appendChild(chip);
+    });
+  }
+
+  $("btnDash").onclick = async () => {
+    try{
+      setStatus($("statusDash"), "Atualizando dashboard...", null);
+      const res = await postAdmin({ action: "dashboard" });
+      if (!res || !res.ok) throw new Error(res?.error || "Erro");
+
+      const d = res.dashboard || {};
+      $("kpis").innerHTML = `
+        <div class="kpi"><b>Total de pedidos</b>${d.totalPedidos ?? 0}</div>
+        <div class="kpi"><b>Pedidos hoje</b>${d.pedidosHoje ?? 0}</div>
+      `;
+
+      renderChips($("chipsPg"), d.porPagamento);
+      renderChips($("chipsOrigem"), d.porOrigem);
+
+      setStatus($("statusDash"), "✅ Dashboard atualizado.", true);
+    }catch(e){
+      setStatus($("statusDash"), "❌ " + (e.message || "Erro"), false);
+    }
+  };
+
+  // Pedidos
+  let lastOrders = [];
+
+  function escapeHtml(s){
+    return (s ?? "").toString()
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;");
+  }
+
+  function renderTable(data){
+    const headers = ["DataHora","Nome","Telefone","Endereco","Pedido","Pagamento","Troco","Obs","Origem"];
+
+    $("tbl").querySelector("thead").innerHTML =
+      "<tr>" + headers.map(h => `<th>${h}</th>`).join("") + "</tr>";
+
+    $("tbl").querySelector("tbody").innerHTML =
+      data.map(o => `
+        <tr>
+          ${headers.map(h => `<td>${escapeHtml(o[h])}</td>`).join("")}
+        </tr>
+      `).join("");
+  }
+
+  $("btnPedidos").onclick = async () => {
+    try{
+      setStatus($("statusPedidos"), "Carregando pedidos...", null);
+      const res = await postAdmin({ action: "list_orders" });
+      if (!res || !res.ok) throw new Error(res?.error || "Erro");
+
+      lastOrders = res.data || [];
+      renderTable(lastOrders);
+      $("btnExportar").disabled = !lastOrders.length;
+
+      setStatus($("statusPedidos"), `✅ ${lastOrders.length} pedidos carregados.`, true);
+    }catch(e){
+      setStatus($("statusPedidos"), "❌ " + (e.message || "Erro"), false);
+      $("btnExportar").disabled = true;
+    }
+  };
+
+  // Exportar CSV (abre no Excel)
+  $("btnExportar").onclick = () => {
+    if (!lastOrders.length) return;
+
+    const headers = ["DataHora","Nome","Telefone","Endereco","Pedido","Pagamento","Troco","Obs","Origem"];
+    const csv = [
+      headers.join(";"),
+      ...lastOrders.map(o => headers.map(h => `"${(o[h] ?? "").toString().replaceAll('"','""')}"`).join(";"))
+    ].join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "pedidos.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Carrega automaticamente o cardápio atual ao abrir (opcional)
+  // Você pode comentar se não quiser.
+  (async () => {
+    try {
+      const pub = await getPublic();
+      if (pub?.ok) {
+        $("cardapioImg").value = pub.cardapio?.img || "";
+        $("cardapioTexto").value = pub.cardapio?.texto || "";
+      }
+    } catch(e) {}
+  })();
+</script>
+</body>
+</html>
